@@ -1671,6 +1671,11 @@ sftp_download(struct sftp_conn *conn, const char *remote_path,
 		    size, &progress_counter);
 	}
 
+	if (fstat(local_fd, &st) == -1) {
+		error("stat local \"%s\": %s", local_path, strerror(errno));
+		goto fail;
+	}
+
 	if ((msg = sshbuf_new()) == NULL)
 		fatal_f("sshbuf_new failed");
 
@@ -1739,7 +1744,8 @@ sftp_download(struct sftp_conn *conn, const char *remote_path,
 				seen_zerolen = 1;
 			}
 			lmodified = 1;
-			if ((lseek(local_fd, req->offset, SEEK_SET) == -1 ||
+			if ((
+			(S_ISREG(st.st_mode) && lseek(local_fd, req->offset, SEEK_SET) == -1) ||
 			    atomicio(vwrite, local_fd, data, len) != len) &&
 			    !write_error) {
 				write_errno = errno;
@@ -1824,10 +1830,12 @@ sftp_download(struct sftp_conn *conn, const char *remote_path,
 			error("Unable to resume download of \"%s\": "
 			    "server reordered requests", local_path);
 		}
-		debug("truncating at %llu", (unsigned long long)highwater);
-		if (ftruncate(local_fd, highwater) == -1)
-			error("local ftruncate \"%s\": %s", local_path,
-			    strerror(errno));
+		if (S_ISREG(st.st_mode)) {
+			debug("truncating at %llu", (unsigned long long)highwater);
+			if (ftruncate(local_fd, highwater) == -1)
+				error("local ftruncate \"%s\": %s", local_path,
+				    strerror(errno));
+		}
 	}
 	if (read_error) {
 		error("read remote \"%s\" : %s", remote_path, fx2txt(status));
